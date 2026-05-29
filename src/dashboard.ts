@@ -973,6 +973,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // --- MD EXPORT (LIVE DASHBOARD) ---
   document.getElementById("export-md-btn")?.addEventListener("click", async () => {
     try {
       const state = await chrome.runtime.sendMessage({ type: "GET_STATE" });
@@ -981,6 +982,23 @@ document.addEventListener("DOMContentLoaded", async () => {
       const filename = `meeting-summary-${new Date().toISOString().slice(0, 10)}.md`;
       downloadFile(markdown, filename, "text/markdown");
       showToast("Downloaded as .md file", "success");
+    } catch (err) {
+      showToast("Failed to export: " + (err instanceof Error ? err.message : String(err)), "error");
+    } finally {
+      exportDropdown?.setAttribute("hidden", "");
+      exportBtn?.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  // --- TXT EXPORT (LIVE DASHBOARD) ---
+  document.getElementById("export-txt-btn")?.addEventListener("click", async () => {
+    try {
+      const state = await chrome.runtime.sendMessage({ type: "GET_STATE" });
+      if (!state) throw new Error("No meeting data available");
+      const textContent = generateMarkdown(state); // Use the live state formatter
+      const filename = `meeting-summary-${new Date().toISOString().slice(0, 10)}.txt`;
+      downloadFile(textContent, filename, "text/plain");
+      showToast("Downloaded as .txt file", "success");
     } catch (err) {
       showToast("Failed to export: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
@@ -1099,7 +1117,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           const actionCount = s.actionItems?.length || 0;
 
           return `
-          <div class="session-item" data-session-id="${s.id}">
+          <div class="session-item" data-session-id="${(s as any).id}">
             <div class="session-item-header">
               <div>
                 <div class="session-item-date">${escapeHtml(date)} at ${escapeHtml(time)}</div>
@@ -1116,15 +1134,15 @@ document.addEventListener("DOMContentLoaded", async () => {
               <span>${actionCount} actions</span>
             </div>
             <div class="session-item-actions">
-              <button class="session-export-btn" data-session-id="${s.id}" title="Export as Markdown">
+              <button class="session-export-btn" data-session-id="${(s as any).id}" title="Export as Markdown">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Export
               </button>
-              <button class="session-export-btn session-download-btn" data-session-id="${s.id}" title="Download as Markdown File">
+              <button class="session-export-btn session-download-btn" data-session-id="${(s as any).id}" title="Download as Markdown File">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Download
               </button>
-              <button class="session-delete-btn" data-session-id="${s.id}" title="Delete session">
+              <button class="session-delete-btn" data-session-id="${(s as any).id}" title="Delete session">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                 Delete
               </button>
@@ -1192,6 +1210,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // --- THIS FORMATTER IS FOR SAVED HISTORY SESSIONS ---
   function generateSessionMarkdown(session: State): string {
     let md = `# Meeting Summary\n\n`;
     md += `**Date:** ${new Date((session as any).savedAt || session.startTime).toLocaleString()}\n`;
@@ -1214,46 +1233,4 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (session.actionItems?.length) {
       const sessionMeetingId = session.meetingId || "unknown";
-      md += `## Action Items\n`;
-      session.actionItems.forEach((a: ActionItem) => {
-        const task = resolveActionKey(a);
-        if (!task) return;
-        const statusKey = buildActionStatusKey(sessionMeetingId, task);
-        const done = actionStatuses.get(statusKey) === true;
-        md += done ? `- [x] ${task}` : `- [ ] ${task}`;
-        if (a.owner) md += ` → ${a.owner}`;
-        if (a.deadline) md += ` (due: ${a.deadline})`;
-        md += "\n";
-      });
-    }
-    return md;
-  }
-
-  function exportSessionMarkdown(session: State) {
-    const md = generateSessionMarkdown(session);
-
-    navigator.clipboard
-      .writeText(md)
-      .then(() => {
-        showToast("Session exported to clipboard", "success");
-      })
-      .catch((err) => {
-        showToast(
-          "Failed to export session: " + (err instanceof Error ? err.message : String(err)),
-          "error",
-        );
-      });
-  }
-
-  function downloadSessionMarkdown(session: State) {
-    const md = generateSessionMarkdown(session);
-
-    const filename = `meeting-summary-${new Date((session as any).savedAt || session.startTime).toISOString().slice(0, 10)}.md`;
-    downloadFile(md, filename, "text/markdown");
-    showToast("Downloaded as .md file", "success");
-  }
-
-  // Load history on tab switch
-  document.querySelector('[data-tab="history"]')?.addEventListener("click", loadMeetingHistory);
-  // Session loading is handled in the tab click listener now
-});
+      md += `## Action
