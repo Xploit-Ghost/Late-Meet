@@ -1233,4 +1233,45 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (session.actionItems?.length) {
       const sessionMeetingId = session.meetingId || "unknown";
-      md += `## Action
+      md += `## Action Items\n`;
+      session.actionItems.forEach((a: ActionItem) => {
+        const task = resolveActionKey(a);
+        if (!task) return;
+        const statusKey = buildActionStatusKey(sessionMeetingId, task);
+        const done = actionStatuses.get(statusKey) === true;
+        md += done ? `- [x] ${task}` : `- [ ] ${task}`;
+        if (a.owner) md += ` → ${a.owner}`;
+        if (a.deadline) md += ` (due: ${a.deadline})`;
+        md += "\n";
+      });
+    }
+    return md;
+  }
+
+  function exportSessionMarkdown(session: State) {
+    const md = generateSessionMarkdown(session);
+
+    navigator.clipboard
+      .writeText(md)
+      .then(() => {
+        showToast("Session exported to clipboard", "success");
+      })
+      .catch((err) => {
+        showToast(
+          "Failed to export session: " + (err instanceof Error ? err.message : String(err)),
+          "error",
+        );
+      });
+  }
+
+  function downloadSessionMarkdown(session: State) {
+    const md = generateSessionMarkdown(session);
+
+    const filename = `meeting-summary-${new Date((session as any).savedAt || session.startTime).toISOString().slice(0, 10)}.md`;
+    downloadFile(md, filename, "text/markdown");
+    showToast("Downloaded as .md file", "success");
+  }
+
+  // Load history on tab switch
+  document.querySelector('[data-tab="history"]')?.addEventListener("click", loadMeetingHistory);
+});
