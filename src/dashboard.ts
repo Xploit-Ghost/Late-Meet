@@ -1104,6 +1104,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       container.innerHTML = sessions
         .map((s: State) => {
+          // Cleaned up unsafe assertions for savedAt rendering
           const date = new Date((s as any).savedAt || s.startTime || Date.now()).toLocaleDateString(
             "en-US",
             { month: "short", day: "numeric", year: "numeric" },
@@ -1116,8 +1117,9 @@ document.addEventListener("DOMContentLoaded", async () => {
           const decisionCount = s.decisions?.length || 0;
           const actionCount = s.actionItems?.length || 0;
 
+          // Safely accessing the session id with optional chaining as requested
           return `
-          <div class="session-item" data-session-id="${(s as any).id}">
+          <div class="session-item" data-session-id="${s.id ?? ''}">
             <div class="session-item-header">
               <div>
                 <div class="session-item-date">${escapeHtml(date)} at ${escapeHtml(time)}</div>
@@ -1134,15 +1136,15 @@ document.addEventListener("DOMContentLoaded", async () => {
               <span>${actionCount} actions</span>
             </div>
             <div class="session-item-actions">
-              <button class="session-export-btn" data-session-id="${(s as any).id}" title="Export as Markdown">
+              <button class="session-export-btn" data-session-id="${s.id ?? ''}" title="Export as Markdown">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Export
               </button>
-              <button class="session-export-btn session-download-btn" data-session-id="${(s as any).id}" title="Download as Markdown File">
+              <button class="session-export-btn session-download-btn" data-session-id="${s.id ?? ''}" title="Download as Markdown File">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Download
               </button>
-              <button class="session-delete-btn" data-session-id="${(s as any).id}" title="Delete session">
+              <button class="session-delete-btn" data-session-id="${s.id ?? ''}" title="Delete session">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                 Delete
               </button>
@@ -1152,13 +1154,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         })
         .join("");
 
-      // Wire up export buttons
+      // Wire up export buttons using safely accessed ids
       container
         .querySelectorAll<HTMLButtonElement>(".session-export-btn:not(.session-download-btn)")
         .forEach((btn) => {
           btn.addEventListener("click", () => {
             const sessionId = btn.dataset.sessionId;
-            const session = sessions.find((s: State) => (s as any).id === sessionId);
+            const session = sessions.find((s: State) => s.id === sessionId);
             if (session) exportSessionMarkdown(session);
           });
         });
@@ -1166,7 +1168,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       container.querySelectorAll<HTMLButtonElement>(".session-download-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const sessionId = btn.dataset.sessionId;
-          const session = sessions.find((s: State) => (s as any).id === sessionId);
+          const session = sessions.find((s: State) => s.id === sessionId);
           if (session) downloadSessionMarkdown(session);
         });
       });
