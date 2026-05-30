@@ -1155,12 +1155,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         .join("");
 
       // Wire up export buttons using safely accessed ids
+      // Wire up export buttons
       container
         .querySelectorAll<HTMLButtonElement>(".session-export-btn:not(.session-download-btn)")
         .forEach((btn) => {
           btn.addEventListener("click", () => {
             const sessionId = btn.dataset.sessionId;
-            const session = sessions.find((s: State) => s.id === sessionId);
+            const session = sessions.find((s: State) => (s.id ?? "") === sessionId);
             if (session) exportSessionMarkdown(session);
           });
         });
@@ -1168,7 +1169,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       container.querySelectorAll<HTMLButtonElement>(".session-download-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const sessionId = btn.dataset.sessionId;
-          const session = sessions.find((s: State) => s.id === sessionId);
+          const session = sessions.find((s: State) => (s.id ?? "") === sessionId);
           if (session) downloadSessionMarkdown(session);
         });
       });
