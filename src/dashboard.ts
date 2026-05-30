@@ -23,15 +23,15 @@ function buildActionStatusKey(meetingId: string, task: string): string {
 
 function normalizeActionItem(input: unknown): ActionItem | null {
   if (!input || typeof input !== "object") return null;
-  const raw = input as { task?: unknown; owner?: unknown; deadline?: unknown };
+  const raw = input as Partial<ActionItem>;
   const task = String(raw.task ?? "").trim();
   if (!task) return null;
   return {
     task,
     owner: String(raw.owner ?? "").trim() || undefined,
     deadline: String(raw.deadline ?? "").trim() || undefined,
-    confidence: (raw as any).confidence,
-    isSpeculative: (raw as any).isSpeculative,
+    confidence: raw.confidence,
+    isSpeculative: raw.isSpeculative,
   } as ActionItem;
 }
 
@@ -272,18 +272,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
     if (message.type === "SESSION_ENDED") {
-      // Reload history if on that tab
-      const historyTab = document.querySelector('[data-tab="history"]');
-      if (historyTab?.classList.contains("active")) {
-        loadMeetingHistory();
-      }
-      // Reload sessions if on that tab
-      const sessionsTab = document.querySelector('[data-tab="sessions"]');
-      if (sessionsTab?.classList.contains("active")) {
-        loadMeetingHistory();
-      } else {
-        loadedTabs.delete("sessions");
-      }
+      // Dynamic load requested by human reviewer
+      loadMeetingHistory();
+      loadedTabs.delete("sessions");
     }
     if (message.type === "WAVEFORM_DATA" && Array.isArray(message.buckets)) {
       drawWaveform(message.buckets);
@@ -356,21 +347,22 @@ document.addEventListener("DOMContentLoaded", async () => {
       const statusDot = document.querySelector(".dash-status-dot");
       if (statusText) statusText.textContent = `Meeting active — ${meetingId || "unknown"}`;
       if (statusDot) statusDot.classList.add("active");
-    } catch (err: any) {
-      if ((err.message || "").includes("active stream")) {
+    } catch (err) {
+      const e = err as Error;
+      if ((e.message || "").includes("active stream")) {
         setAudioBtnActive(true);
         return;
       }
-
-      handleDashboardAudioError(err);
+      handleDashboardAudioError(e);
     }
 
-    function handleDashboardAudioError(err: any) {
-      console.error("[Dashboard] Failed to start audio:", err);
+    function handleDashboardAudioError(err: unknown) {
+      const e = err as Error;
+      console.error("[Dashboard] Failed to start audio:", e);
       if (audioBtn) {
         audioBtn.disabled = false;
         audioBtn.textContent =
-          (err.message || String(err)).length > 30 ? "Error — Retry" : err.message || "Error";
+          (e.message || String(e)).length > 30 ? "Error — Retry" : e.message || "Error";
         setTimeout(() => {
           if (audioBtn) {
             audioBtn.innerHTML =
@@ -397,11 +389,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ——— Duration Timer ———
-  let timerInterval: number | NodeJS.Timeout | null = null;
+  let timerInterval: number | null = null;
 
   function startTimer(startTime: number) {
     if (timerInterval) return;
-    timerInterval = setInterval(() => {
+    timerInterval = window.setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const timerEl = document.getElementById("dash-timer");
       if (timerEl) timerEl.textContent = formatDuration(elapsed);
@@ -423,7 +415,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (statusDot) statusDot.classList.remove("active");
       if (statusText) statusText.textContent = "No active meeting";
       if (timerInterval) {
-        clearInterval(timerInterval as any);
+        window.clearInterval(timerInterval);
         timerInterval = null;
       }
     }
@@ -852,16 +844,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     container.scrollTop = container.scrollHeight;
   }
 
-  // ——— Export Helpers ———
+  // ——— Unified Export Helper (Handles both Live & History) ———
   function generateMarkdown(state: State): string {
-    const date = new Date().toLocaleDateString("en-US", {
+    const dateVal = state.savedAt || state.startTime || Date.now();
+    const date = new Date(dateVal).toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
       day: "numeric",
     });
+
     let md = `# Meeting Summary — ${date}\n\n`;
     md += `**Meeting ID:** ${state.meetingId || "N/A"}\n`;
-    md += `**Duration:** ${formatDuration(state.duration || 0)}\n`;
+
+    // Safely extract duration even if the type strictness misses it
+    const duration = (state as State & { duration?: number }).duration || 0;
+    md += `**Duration:** ${formatDuration(duration)}\n`;
     md += `**Sentiment:** ${state.sentiment || "neutral"}\n\n`;
 
     md += `## Attendees\n`;
@@ -876,10 +873,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     md += `## Action Items\n`;
     if (state.actionItems?.length) {
+      const sessionMeetingId = state.meetingId || "unknown";
       state.actionItems.forEach((a: ActionItem) => {
         const task = resolveActionKey(a);
         if (!task) return;
-        const statusKey = buildActionStatusKey(currentMeetingId, task);
+        const statusKey = buildActionStatusKey(sessionMeetingId, task);
         const done = actionStatuses.get(statusKey) === true;
         md += done ? `- [x] ${task}` : `- [ ] ${task}`;
         if (a.owner) md += ` — ${a.owner}`;
@@ -914,7 +912,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     md += `## Key Insights\n`;
     if (state.keyInsights?.length) {
       state.keyInsights.forEach((insight) => {
-        md += `- ${insight}\n`;
+        md += `- ${insight.text}\n`;
       });
       md += "\n";
     } else {
@@ -983,7 +981,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       downloadFile(markdown, filename, "text/markdown");
       showToast("Downloaded as .md file", "success");
     } catch (err) {
-      showToast("Failed to export: " + (err instanceof Error ? err.message : String(err)), "error");
+      const e = err as Error;
+      showToast("Failed to export: " + (e.message || String(e)), "error");
     } finally {
       exportDropdown?.setAttribute("hidden", "");
       exportBtn?.setAttribute("aria-expanded", "false");
@@ -995,12 +994,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const state = await chrome.runtime.sendMessage({ type: "GET_STATE" });
       if (!state) throw new Error("No meeting data available");
-      const textContent = generateMarkdown(state); // Use the live state formatter
+      const textContent = generateMarkdown(state);
       const filename = `meeting-summary-${new Date().toISOString().slice(0, 10)}.txt`;
       downloadFile(textContent, filename, "text/plain");
       showToast("Downloaded as .txt file", "success");
     } catch (err) {
-      showToast("Failed to export: " + (err instanceof Error ? err.message : String(err)), "error");
+      const e = err as Error;
+      showToast("Failed to export: " + (e.message || String(e)), "error");
     } finally {
       exportDropdown?.setAttribute("hidden", "");
       exportBtn?.setAttribute("aria-expanded", "false");
@@ -1046,7 +1046,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const sessionData = {
         exportedAt: new Date().toISOString(),
         meetingId: state.meetingId || "unknown",
-        duration: state.duration || 0,
+        duration: (state as State & { duration?: number }).duration || 0,
         sentiment: state.sentiment || "neutral",
         summary: state.summary || "",
         participants: state.participants || [],
@@ -1061,7 +1061,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       downloadFile(JSON.stringify(sessionData, null, 2), filename, "application/json");
       showToast("Downloaded as .json backup", "success");
     } catch (err) {
-      showToast("Failed to export: " + (err instanceof Error ? err.message : String(err)), "error");
+      const e = err as Error;
+      showToast("Failed to export: " + (e.message || String(e)), "error");
     } finally {
       exportDropdown?.setAttribute("hidden", "");
       exportBtn?.setAttribute("aria-expanded", "false");
@@ -1085,7 +1086,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${Strings.padStart(2, "0")}`;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
   // ——— Meeting History Tab ———
@@ -1104,7 +1105,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       container.innerHTML = sessions
         .map((s: State) => {
-          // Cleaned up unsafe assertions for savedAt rendering
           const date = new Date(s.savedAt || s.startTime || Date.now()).toLocaleDateString(
             "en-US",
             { month: "short", day: "numeric", year: "numeric" },
@@ -1117,16 +1117,15 @@ document.addEventListener("DOMContentLoaded", async () => {
           const decisionCount = s.decisions?.length || 0;
           const actionCount = s.actionItems?.length || 0;
 
-          // Safely accessing the session id with optional chaining as requested
           return `
-          <div class="session-item" data-session-id="${s.id ?? ""}">
+          <div class="session-item" data-session-id="${s.id}">
             <div class="session-item-header">
               <div>
                 <div class="session-item-date">${escapeHtml(date)} at ${escapeHtml(time)}</div>
                 <div class="session-item-id" title="${escapeHtml(s.meetingUrl || "")}">${escapeHtml(s.meetingUrl || s.meetingId || "Unknown Meeting")}</div>
               </div>
               <div class="session-item-meta">
-                <span>${formatDuration(s.duration || 0)}</span>
+                <span>${formatDuration((s as State & { duration?: number }).duration || 0)}</span>
               </div>
             </div>
             <div class="session-item-summary" style="cursor: pointer;" title="Click to expand/collapse summary">${escapeHtml(s.summary || "No summary available")}</div>
@@ -1136,15 +1135,15 @@ document.addEventListener("DOMContentLoaded", async () => {
               <span>${actionCount} actions</span>
             </div>
             <div class="session-item-actions">
-              <button class="session-export-btn" data-session-id="${s.id ?? ""}" title="Export as Markdown">
+              <button class="session-export-btn" data-session-id="${s.id}" title="Export as Markdown">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Export
               </button>
-              <button class="session-export-btn session-download-btn" data-session-id="${s.id ?? ""}" title="Download as Markdown File">
+              <button class="session-export-btn session-download-btn" data-session-id="${s.id}" title="Download as Markdown File">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
                 Download
               </button>
-              <button class="session-delete-btn" data-session-id="${s.id ?? ""}" title="Delete session">
+              <button class="session-delete-btn" data-session-id="${s.id}" title="Delete session">
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                 Delete
               </button>
@@ -1154,7 +1153,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         })
         .join("");
 
-      // Wire up export buttons using safely accessed ids
       // Wire up export buttons
       container
         .querySelectorAll<HTMLButtonElement>(".session-export-btn:not(.session-download-btn)")
@@ -1213,46 +1211,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // --- THIS FORMATTER IS FOR SAVED HISTORY SESSIONS ---
-  function generateSessionMarkdown(session: State): string {
-    let md = `# Meeting Summary\n\n`;
-    md += `**Date:** ${new Date((session as any).savedAt || session.startTime).toLocaleString()}\n`;
-    md += `**Duration:** ${formatDuration(session.duration || 0)}\n`;
-    md += `**Meeting ID:** ${session.meetingId || "N/A"}\n`;
-    md += `**Participants:** ${session.participants?.join(", ") || "N/A"}\n\n`;
-    md += `## Summary\n${session.summary || "N/A"}\n\n`;
-
-    if (session.topics?.length) {
-      md += `## Topics\n`;
-      session.topics.forEach((t: Topic) => (md += `- ${t.name} (${t.status})\n`));
-      md += "\n";
-    }
-    if (session.decisions?.length) {
-      md += `## Decisions\n`;
-      session.decisions.forEach(
-        (d: Decision) => (md += `- ${d.text}${d.by ? ` — ${d.by}` : ""}\n`),
-      );
-      md += "\n";
-    }
-    if (session.actionItems?.length) {
-      const sessionMeetingId = session.meetingId || "unknown";
-      md += `## Action Items\n`;
-      session.actionItems.forEach((a: ActionItem) => {
-        const task = resolveActionKey(a);
-        if (!task) return;
-        const statusKey = buildActionStatusKey(sessionMeetingId, task);
-        const done = actionStatuses.get(statusKey) === true;
-        md += done ? `- [x] ${task}` : `- [ ] ${task}`;
-        if (a.owner) md += ` → ${a.owner}`;
-        if (a.deadline) md += ` (due: ${a.deadline})`;
-        md += "\n";
-      });
-    }
-    return md;
-  }
-
+  // ——— HISTORY EXPORT ACTIONS (Now perfectly unified with the dynamic generator!) ———
   function exportSessionMarkdown(session: State) {
-    const md = generateSessionMarkdown(session);
+    const md = generateMarkdown(session);
 
     navigator.clipboard
       .writeText(md)
@@ -1260,17 +1221,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         showToast("Session exported to clipboard", "success");
       })
       .catch((err) => {
-        showToast(
-          "Failed to export session: " + (err instanceof Error ? err.message : String(err)),
-          "error",
-        );
+        const e = err as Error;
+        showToast("Failed to export session: " + (e.message || String(e)), "error");
       });
   }
 
   function downloadSessionMarkdown(session: State) {
-    const md = generateSessionMarkdown(session);
+    const md = generateMarkdown(session);
 
-    const filename = `meeting-summary-${new Date((session as any).savedAt || session.startTime).toISOString().slice(0, 10)}.md`;
+    const dateVal = session.savedAt || session.startTime || Date.now();
+    const filename = `meeting-summary-${new Date(dateVal).toISOString().slice(0, 10)}.md`;
     downloadFile(md, filename, "text/markdown");
     showToast("Downloaded as .md file", "success");
   }
