@@ -1085,7 +1085,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${Strings.padStart(2, "0")}`;
   }
 
   // ——— Meeting History Tab ———
@@ -1105,11 +1105,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       container.innerHTML = sessions
         .map((s: State) => {
           // Cleaned up unsafe assertions for savedAt rendering
-          const date = new Date((s as any).savedAt || s.startTime || Date.now()).toLocaleDateString(
+          const date = new Date(s.savedAt || s.startTime || Date.now()).toLocaleDateString(
             "en-US",
             { month: "short", day: "numeric", year: "numeric" },
           );
-          const time = new Date((s as any).savedAt || s.startTime || Date.now()).toLocaleTimeString(
+          const time = new Date(s.savedAt || s.startTime || Date.now()).toLocaleTimeString(
             "en-US",
             { hour: "2-digit", minute: "2-digit" },
           );
